@@ -1,39 +1,176 @@
-void setup() {
-  
-  Serial.begin(9600);
-  analogReference(INTERNAL);
-  //analogReference(INTERNAL1V1); //solo Arduino Mega
-}
+#include <SPI.h>
+#include <Ethernet.h>
+// Declaración de la direcciones MAC,IP,GATEWAY ySUBNET.
+byte mac[] = {0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED};
+// Dentro del cdm de Windows ponemos ipconfig y
 
-void loop() {
-  
-  float Irms=get_corriente(); //Corriente eficaz (A)
-  float P=Irms*220.0; // P=IV (Watts)
+IPAddress ip(192, 168, 1, 14); // 192.168.1.XX donde XX es
 
-  Serial.print("Irms: ");
-  Serial.print(Irms,3);
-  Serial.print("A, Potencia: ");
-  Serial.print(P,3);  
-  Serial.println("W");
-  //delay(100);     
-}
+IPAddress gateway(192, 168, 1, 1);
+IPAddress subnet(255, 255, 255, 0);
 
-float get_corriente()
+// Creamos un servidor Web con el puerto 80 que es elpuerto HTTP por defecto
+EthernetServer server(80);
+int LED = 8; // Pin digital para el LED
+String estado = "OFF"; // Estado del LED inicialmente"OFF"
+
+int miVariable = 0; // Variable que deseas modificar
+int kwats;
+int costo;
+int temperatura;
+int humedad;
+
+void setup()
 {
-  float voltajeSensor;
-  float corriente=0;
-  float Sumatoria=0;
-  long tiempo=millis();
-  int N=0;
-  while(millis()-tiempo<500)//Duración 0.5 segundos(Aprox. 30 ciclos de 60Hz)
-  { 
-    voltajeSensor = analogRead(A0) * (1.1 / 1023.0);////voltaje del sensor
-    corriente=voltajeSensor*30.0; //corriente=VoltajeSensor*(30A/1V)
-    Sumatoria=Sumatoria+sq(corriente);//Sumatoria de Cuadrados
-    N=N+1;
-    delay(1);
-  }
-  Sumatoria=Sumatoria*2;//Para compensar los cuadrados de los semiciclos negativos.
-  corriente=sqrt((Sumatoria)/N); //ecuación del RMS
-  return(corriente);
+  pinMode(5,INPUT);
+  
+  Serial.begin(9600); // Comienzo de la comunicación  serie
+
+  // Inicializamos la comunicación Ethernet y el servidor
+  Ethernet.begin(mac, ip, gateway, subnet);
+  server.begin();
+  Serial.print("La IP del servidor local es: ");
+  Serial.println(Ethernet.localIP()); // Nos devuelve la I del hernet Shield
+
+  pinMode(LED, OUTPUT); // Pin digital 8 como salida
 }
+
+void loop()
+{
+ 
+ calculo_corriente_muestre();
+ lectura_magnitudes();
+  EthernetClient client = server.available(); // Creamosun cliente Web
+  // Cuando detecte un cliente a través de una peticiónHTTP
+  if (client)
+  {
+    Serial.println(); // Salto de línea
+    Serial.println("Nuevo cliente");
+    Serial.println();
+    boolean currentLineIsBlank = true; // Una petición HTTP acaba con una línea en blanco
+    String cadena = ""; // Creamos una cadena de caracteres vacía
+    while (client.connected())
+    {
+      if (client.available())
+      {
+        char c = client.read();// Leemos la petición HTTP
+//      carácter por carácter
+        Serial.write(c);// Visualizamos la petición HTTP por        el Monitor Serial
+        cadena.concat(c);// Unimos el String 'cadena' con la        petición HTTP (c).
+        // De esta manera convertimos la petición HTTP a        un String
+      
+         boolean solicitudValida = false;
+         String solicitud = "";
+
+        // Ya que hemos convertido la petición HTTP a unacadena de caracteres, ahora podremos buscar partesdel texto.
+        int posicion = cadena.indexOf("LED="); //Guardamos la posición de la instancia "LED=" a lavariable 'posicion'
+
+        if (cadena.substring(posicion) == "LED=ON") // Si enla posición 'posicion' hay "LED=ON"
+        {
+          digitalWrite(LED, HIGH);
+          estado = "ON";
+        }
+        if (cadena.substring(posicion) == "LED=OFF") // Si en la posición 'posicion' hay "LED=OFF"
+        {
+          digitalWrite(LED, LOW);
+          estado = "OFF";
+          
+        }
+         solicitud += c;
+      if (c == '\n') {
+        // Verifica si la solicitud contiene "miVariable="
+        if (solicitud.indexOf("miVariable=") != -1) {
+          // Extrae el valor de miVariable de la solicitud
+          int valor = solicitud.substring(solicitud.indexOf("miVariable=") + 11).toInt();
+         int  miVariable = valor;
+        Serial.println(miVariable);
+        }
+        solicitudValida = true;
+        
+      }
+
+        // Cuando reciba una línea en blanco, quiere decirque la petición HTTP ha acabado y el servidor Web está listo
+        // para enviar una respuesta
+        if (c == '\n' && currentLineIsBlank)
+        {
+          // Enviamos al cliente una respuesta HTTP
+          client.println("HTTP/1.1 200 OK");
+          client.println("Content-Type: text/html");
+          client.println();
+
+          // Página web en formato HTML
+          client.println("<html>");
+          client.println("<head>");
+          client.println("</head>");
+          client.println("<body style='background-color:#40E0D0;'>");
+          client.println("<br/><br/>");
+          client.println("<h1 align='center'>LEDcontrolado por Servidor Web con Arduino</h1>");
+          // Creamos los botones.
+          // Para enviar parámetros a través de HTML seutiliza el método URL encode.
+          // Los parámetros se envían a través del símbolo    '?'
+          client.println("<div style='text-align:center;'>");
+          client.println("<button onClick=location.href='./?LED=ON\'style='margin:auto;background-color: #84B1FF;color: snow;padding: 10px;border: 1px solid#3F7CFF;width:85px;'>");
+          client.println("ON");
+          client.println("</button>");
+          client.println("<button onClick=location.href='./?LED=OFF\'style='margin:auto;background-color: #84B1FF;color:snow;padding: 10px;border: 1px solid#3F7CFF;width:85px;'>");
+          client.println("OFF");
+          client.println("</button>");
+          client.println("<br/><br/>");
+          client.println("<b>ESTADO DEL LED = ");
+          client.print(estado);
+           client.println("<b>CONSMUO EN KWATS  = ");
+          client.print(kwats);
+          client.print("</b>");
+           client.println("<b>CORRIENTE  MEDIDA = ");
+          client.print(costo);
+           client.print("</b>");
+            client.println("<b>TEMPERATURA MEDIDA = ");
+          client.print(temperatura);
+           client.print("</b>");
+            client.println("<b>HUMEDAD MEDIDA = ");
+          client.print(humedad);
+           client.print("</b>");
+          client.println("</b><br/>");
+            client.println("<h1>Control de miVariable</h1>");
+            client.println("<form>");
+            client.println("Valor de miVariable: <input type='text' name='miVariable' value='" + String(miVariable) + "'>");
+            client.println("<input type='submit' value='Guardar'>");
+            client.println("</form>");
+            client.println("</b></body>");
+          client.println("</html>");
+          break;
+        }
+        if (c == '\n')
+        {
+          currentLineIsBlank = true;
+        }
+        else if (c != '\r')
+        {
+          currentLineIsBlank = false;
+        }
+        }
+    }
+    }
+    
+    }
+    void calculo_corriente_muestre(){
+    int  corriente=digitalRead(6);
+    
+
+
+int kwats=corriente*220 /1000;
+int  costo=kwats*0.50;
+
+ Serial.print(kwats);
+ Serial.println(costo);
+    }
+      void lectura_magnitudes(){
+    int  temperatura=digitalRead(5);
+    int  humedad=digitalRead(4);
+    int grados=temperatura*57 /1023;//encontrar calculo real 
+    
+
+
+ Serial.print(grados);
+ Serial.println(humedad);
+    }
